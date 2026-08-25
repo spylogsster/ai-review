@@ -27,11 +27,14 @@ import {
   extractTokenUsageFromText,
 } from '../src/review.ts';
 import {
+  buildAgentsContext,
   extractReferencedMarkdownFiles,
   buildReferencedMarkdownContext,
   resolvePromptHeaderLines,
   DEFAULT_PROMPT_HEADER_LINES,
+  NO_POLICY_PROMPT_HEADER_LINES,
 } from '../src/prompt.ts';
+import { execFileSync } from 'node:child_process';
 
 const PASS_RESULT = { status: 'pass', summary: 'No issues', findings: [] };
 const FAIL_RESULT = { status: 'fail', summary: 'Bad code', findings: [{ severity: 'high', title: 'Bug', details: 'x', file: 'src/file.ts', line: 1 }] };
@@ -151,28 +154,34 @@ test('evaluateResults reports all three reviewers when available', () => {
 
 
 test('resolvePromptHeaderLines returns defaults when unset', () => {
-  const lines = resolvePromptHeaderLines(undefined);
+  const lines = resolvePromptHeaderLines(undefined, true);
   assert.deepEqual(lines, [...DEFAULT_PROMPT_HEADER_LINES]);
 });
 
 test('resolvePromptHeaderLines accepts JSON array override', () => {
-  const lines = resolvePromptHeaderLines('["Line A","Line B"]');
+  const lines = resolvePromptHeaderLines('["Line A","Line B"]', true);
   assert.deepEqual(lines, ['Line A', 'Line B']);
 });
 
 test('resolvePromptHeaderLines accepts multiline override', () => {
-  const lines = resolvePromptHeaderLines('Line A\nLine B');
+  const lines = resolvePromptHeaderLines('Line A\nLine B', true);
   assert.deepEqual(lines, ['Line A', 'Line B']);
 });
 
 test('resolvePromptHeaderLines falls back to defaults for empty override', () => {
-  const lines = resolvePromptHeaderLines('   ');
+  const lines = resolvePromptHeaderLines('   ', true);
   assert.deepEqual(lines, [...DEFAULT_PROMPT_HEADER_LINES]);
 });
 
 test('resolvePromptHeaderLines falls back to defaults for empty JSON array', () => {
-  const lines = resolvePromptHeaderLines('[]');
+  const lines = resolvePromptHeaderLines('[]', true);
   assert.deepEqual(lines, [...DEFAULT_PROMPT_HEADER_LINES]);
+});
+
+test('resolvePromptHeaderLines returns no-policy defaults when there is no AGENTS.md', () => {
+  const lines = resolvePromptHeaderLines(undefined, false);
+  assert.deepEqual(lines, [...NO_POLICY_PROMPT_HEADER_LINES]);
+  assert.ok(!lines[0].includes('AGENTS.md'));
 });
 
 
@@ -697,7 +706,7 @@ test('checkPreflight returns false when no token and canReach fails', () => {
 });
 
 test('buildPrompt uses custom diffLabel when provided', () => {
-  const tempDir = mkdtempSync(join(tmpdir(), 'ai-review-test-'));
+  const tempDir = createTempGitRepo();
   writeFileSync(join(tempDir, 'AGENTS.md'), '# Test agents', 'utf8');
   try {
     const prompt = buildPrompt('some diff content', tempDir, 'Branch diff (main...feature)');
@@ -710,12 +719,69 @@ test('buildPrompt uses custom diffLabel when provided', () => {
 });
 
 test('buildPrompt uses default Staged diff label when no diffLabel provided', () => {
-  const tempDir = mkdtempSync(join(tmpdir(), 'ai-review-test-'));
+  const tempDir = createTempGitRepo();
   writeFileSync(join(tempDir, 'AGENTS.md'), '# Test agents', 'utf8');
   try {
     const prompt = buildPrompt('some diff content', tempDir);
     assert.ok(prompt.includes('Staged diff:'));
     assert.ok(prompt.includes('some diff content'));
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+function createTempGitRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'ai-review-repo-'));
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  return dir;
+}
+
+test('buildAgentsContext returns empty context when AGENTS.md is missing', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'ai-review-test-'));
+  try {
+    assert.deepEqual(buildAgentsContext(tempDir), { agents: '', referenced: [] });
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('buildAgentsContext lists tracked markdown from the given cwd, not process.cwd()', () => {
+  const repo = createTempGitRepo();
+  writeFileSync(join(repo, 'AGENTS.md'), 'See `BAR.md`', 'utf8');
+  writeFileSync(join(repo, 'BAR.md'), '# Bar rules', 'utf8');
+  execFileSync('git', ['add', 'AGENTS.md', 'BAR.md'], { cwd: repo });
+  try {
+    const context = buildAgentsContext(repo);
+    assert.equal(context.referenced.length, 1);
+    assert.ok(context.referenced[0].includes('--- FILE: BAR.md ---'));
+    assert.ok(context.referenced[0].includes('# Bar rules'));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('buildPrompt omits the AGENTS.md section and uses the no-policy header when AGENTS.md is missing', () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'ai-review-test-'));
+  try {
+    const prompt = buildPrompt('diff --git a/x b/x\n+hi', tempDir);
+    assert.ok(!prompt.includes('Here is the full AGENTS.md for reference'));
+    assert.ok(prompt.includes(NO_POLICY_PROMPT_HEADER_LINES[0]));
+    assert.ok(!prompt.includes(DEFAULT_PROMPT_HEADER_LINES[0]));
+    assert.ok(prompt.includes('Respond with ONLY a JSON object'));
+    assert.ok(prompt.includes('diff --git a/x b/x'));
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('buildPrompt keeps the AGENTS.md section and header when AGENTS.md exists', () => {
+  const tempDir = createTempGitRepo();
+  writeFileSync(join(tempDir, 'AGENTS.md'), '# Test agents', 'utf8');
+  try {
+    const prompt = buildPrompt('some diff content', tempDir);
+    assert.ok(prompt.includes('Here is the full AGENTS.md for reference:'));
+    assert.ok(prompt.includes('# Test agents'));
+    assert.ok(prompt.includes(DEFAULT_PROMPT_HEADER_LINES[0]));
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }

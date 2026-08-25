@@ -34,7 +34,7 @@ npx git-ai-review diff main feature-branch
 ```
 
 Requirements for the target repo:
-- An `AGENTS.md` file must exist in the repo root (it's used as policy context for the review)
+- An `AGENTS.md` file in the repo root is optional; when present it is used as policy context for the review
 - At least one reviewer CLI must be installed and authenticated: **Codex CLI** (`codex login`), **Copilot CLI** (`copilot auth`), or **Claude CLI** (`claude`)
 
 ## License
@@ -53,7 +53,7 @@ This package is licensed under **MPL-2.0**.
   - all reviewers are unavailable.
 - Tracks consecutive failures and enables a hard lock after a limit (default `10`).
 - Builds prompt context from:
-  - full `AGENTS.md`,
+  - full `AGENTS.md`, when present,
   - tracked markdown files referenced by `AGENTS.md` (including wildcard refs like `deploy*.md`).
 - Resolves binaries via environment variables or system PATH, with macOS app-bundle fallback for Codex (`/Applications/Codex.app/Contents/Resources/codex`).
 
@@ -143,7 +143,7 @@ The `--claude`, `--codex`, and `--copilot` flags are mutually exclusive and can 
 
 In each target repository:
 
-- `AGENTS.md` must exist in repo root.
+- `AGENTS.md` in repo root is optional; when present it is included as policy context.
 - Optional referenced markdown docs (from `AGENTS.md`) should be tracked in git to be included in prompt context.
 - Commits should be made with staged changes (`git add ...`) so diff is reviewable.
 

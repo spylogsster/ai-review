@@ -5,18 +5,32 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { git } from './git.js';
 
-export const DEFAULT_PROMPT_HEADER_LINES = [
-  'You are a strict reviewer for all AGENTS.md rules.',
-  'Review ONLY the staged git diff provided below.',
+const PROMPT_HEADER_BODY_LINES = [
+  'Review ONLY the git diff provided below.',
   'Focus on: safety, architecture correctness, clean logic, componentization quality, likely regressions, maintainability.',
   'Do not comment on formatting-only changes unless they create risk.',
   'Return status=fail if any meaningful issue exists.',
 ] as const;
 
-export function resolvePromptHeaderLines(rawValue = process.env.AI_REVIEW_PROMPT_HEADER): string[] {
+export const DEFAULT_PROMPT_HEADER_LINES = [
+  'You are a strict reviewer for all AGENTS.md rules.',
+  ...PROMPT_HEADER_BODY_LINES,
+] as const;
+
+export const NO_POLICY_PROMPT_HEADER_LINES = [
+  'You are a strict code reviewer.',
+  'No AGENTS.md policy content is available for this review; review against general engineering quality only.',
+  ...PROMPT_HEADER_BODY_LINES,
+] as const;
+
+export function resolvePromptHeaderLines(
+  rawValue: string | undefined,
+  hasAgentsPolicy: boolean,
+): string[] {
+  const fallback = hasAgentsPolicy ? DEFAULT_PROMPT_HEADER_LINES : NO_POLICY_PROMPT_HEADER_LINES;
   const value = rawValue?.trim();
   if (!value) {
-    return [...DEFAULT_PROMPT_HEADER_LINES];
+    return [...fallback];
   }
 
   try {
@@ -27,7 +41,7 @@ export function resolvePromptHeaderLines(rawValue = process.env.AI_REVIEW_PROMPT
         .map((line) => line.trim())
         .filter((line) => line.length > 0);
 
-      return lines.length > 0 ? lines : [...DEFAULT_PROMPT_HEADER_LINES];
+      return lines.length > 0 ? lines : [...fallback];
     }
   } catch {
     // fallback to plain multiline text parsing
@@ -38,7 +52,7 @@ export function resolvePromptHeaderLines(rawValue = process.env.AI_REVIEW_PROMPT
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  return lines.length > 0 ? lines : [...DEFAULT_PROMPT_HEADER_LINES];
+  return lines.length > 0 ? lines : [...fallback];
 }
 
 function escapeRegex(value: string): string {
@@ -52,8 +66,8 @@ function wildcardToRegex(pattern: string): RegExp {
   return new RegExp(`^${escaped}$`);
 }
 
-function listTrackedMarkdownFiles(): string[] {
-  const output = git(['ls-files', '*.md']);
+function listTrackedMarkdownFiles(cwd: string): string[] {
+  const output = git(['ls-files', '*.md'], cwd);
   if (!output) {
     return [];
   }
@@ -110,9 +124,17 @@ export function buildReferencedMarkdownContext(
 
 export function buildAgentsContext(cwd = process.cwd()): { agents: string; referenced: string[] } {
   const agentsPath = resolve(cwd, 'AGENTS.md');
-  const agents = readFileSync(agentsPath, 'utf8');
+  let agents: string;
+  try {
+    agents = readFileSync(agentsPath, 'utf8');
+  } catch (error) {
+    // AGENTS.md is optional; anything other than "not there" is still a real failure.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return { agents: '', referenced: [] };
+  }
+
   const references = extractReferencedMarkdownFiles(agents);
-  const trackedMdFiles = listTrackedMarkdownFiles();
+  const trackedMdFiles = listTrackedMarkdownFiles(cwd);
 
   return {
     agents,

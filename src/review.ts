@@ -218,10 +218,10 @@ function getStagedDiff(): string {
 export function buildPrompt(diff: string, cwd = process.cwd(), diffLabel = 'Staged diff'): string {
   const context = buildAgentsContext(cwd);
   return [
-    ...resolvePromptHeaderLines(),
-    '',
-    'Here is the full AGENTS.md for reference:',
-    context.agents,
+    ...resolvePromptHeaderLines(process.env.AI_REVIEW_PROMPT_HEADER, Boolean(context.agents)),
+    ...(context.agents
+      ? ['', 'Here is the full AGENTS.md for reference:', context.agents]
+      : []),
     ...(context.referenced.length > 0
       ? [
         '',

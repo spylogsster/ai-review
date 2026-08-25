@@ -38,9 +38,9 @@ All contributors and AI agents must follow these rules.
 
 ## Prompt and Policy Rules
 
-- `AGENTS.md` in target repository is mandatory policy input for review mode.
+- `AGENTS.md` in target repository is optional policy input for review mode. When it is absent, review falls back to a prompt header that makes no reference to `AGENTS.md` rules.
 - Prompt must include:
-  - full `AGENTS.md`
+  - full `AGENTS.md`, when present
   - tracked markdown files referenced by `AGENTS.md` (including wildcard references)
   - staged diff (for `review` command) or branch-to-branch diff (for `diff` command)
 - Do not include untracked/local arbitrary files in prompt context.
