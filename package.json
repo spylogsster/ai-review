@@ -1,6 +1,6 @@
 {
   "name": "git-ai-review",
-  "version": "2.4.2",
+  "version": "2.5.0",
   "description": "Review your git diff with local Codex CLI, Copilot CLI, or Claude CLI — run manually in one command or automatically as a git hook",
   "type": "module",
   "main": "dist/cli.js",
